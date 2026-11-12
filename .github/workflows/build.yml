@@ -1,1 +1,84 @@
 
+name: Build NWA
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recuperer mon depot
+        uses: actions/checkout@v4
+        with:
+          path: mine
+
+      - name: Recuperer le template NumWorks
+        uses: actions/checkout@v4
+        with:
+          repository: numworks/epsilon-sample-app-c
+          path: template
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer la toolchain ARM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi
+          arm-none-eabi-gcc --version | head -1
+          node --version
+
+      - name: Structure du template
+        run: |
+          ls -R template | head -60
+          echo "--- Makefile ---"
+          cat template/Makefile
+
+      # 1) Template d'origine, sans aucune modification
+      - name: Compiler le template d'origine
+        working-directory: template
+        run: |
+          make build 2>&1 | tee ../build-original.log
+          mkdir -p ../out
+          cp output/app.nwa ../out/original.nwa
+          ls -l output
+
+      # 2) Mon application
+      - name: Copier mes sources
+        run: |
+          rm -rf template/output
+          cp mine/main.c template/src/main.c
+          if [ -f mine/icon.png ]; then cp mine/icon.png template/src/icon.png; fi
+
+      - name: Compiler mon application
+        working-directory: template
+        run: |
+          make build 2>&1 | tee ../build-mine.log
+          cp output/app.nwa ../out/mine.nwa
+          ls -l output
+
+      - name: Diagnostic
+        run: |
+          ls -l out
+          for f in $(find template -name "*.elf"); do
+            echo "== $f"
+            arm-none-eabi-size -A "$f" || true
+            arm-none-eabi-readelf -S "$f" | head -40 || true
+          done
+          echo "== Debut de mine.nwa"
+          xxd out/mine.nwa | head -8
+          echo "== Debut de original.nwa"
+          xxd out/original.nwa | head -8
+
+      - name: Publier les fichiers
+        uses: actions/upload-artifact@v4
+        with:
+          name: nwa-files
+          path: |
+            out/*.nwa
+            build-original.log
+            build-mine.log
